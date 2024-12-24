@@ -287,7 +287,7 @@ def parse_args():
     parser.add_argument('--coco_root', type=str, required=True,
                         help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
     
-    parser.add_argument('--epochs', type=str, default=10,
+    parser.add_argument('--epochs', type=int, default=10,
                         help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
     
 
@@ -305,6 +305,9 @@ if __name__ == "__main__":
     save_path_template = args.save_path
     coco_root = args.coco_root
     num_epochs = args.epochs
+    
+    if(model_name == 'FPN-FasterRCNN' or model_name == 'SSD'):
+        num_classes +=1
 
     coco_train = f"{coco_root}/train"
     coco_val = f"{coco_root}/valid"
