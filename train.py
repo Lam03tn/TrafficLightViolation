@@ -24,6 +24,7 @@ import pickle
 import os
 from functools import partial
 import pandas as pd
+from ultralytics import YOLO
 
 def collate_fn(batch):
     images, targets = zip(*batch)
@@ -181,25 +182,39 @@ def train_and_evaluate(models, train_loader, val_loader, num_epochs, lr=0.001):
     return results, mAP_results
 
 # Helper function for setting up models
-def get_model(model_name, num_classes,device ='cpu'):
+yolo_models_v8 = {
+    "YOLOv8": "yolov8.yaml",
+    "YOLOv8l": "yolov8l.yaml",
+    "YOLOv8s": "yolov8s.yaml",
+    "YOLOv8x": "yolov8x.yaml"
+}
+
+yolo_models_v5 = {
+    "YOLOv5": "yolov5.yaml",
+    "YOLOv5l": "yolov5l.yaml",
+    "YOLOv5s": "yolov5s.yaml",
+    "YOLOv5x": "yolov5x.yaml"
+}
+
+def get_model(model_name, num_classes,configs_path,device ='cpu'):
     if model_name == "FPN-FasterRCNN":
         model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
             weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
         )
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
-        
-    elif model_name == "YOLOv5":
-        model = YOLO("yolov5.yaml")
-
-    elif model_name == "YOLOv8":
-        from ultralytics import YOLO
-        model = YOLO('yolov8.yaml')  
     
     elif model_name == "SSD":
         model = ssd300_vgg16(weights_backbone = 'DEFAULT', num_classes=num_classes)
         
-    else:
+    elif model_name in yolo_models_v8:
+        model=YOLO(os.path.join(configs_path,yolo_models_v8[model_name]))
+
+    elif model_name in yolo_models_v5:
+        model_path =os.path.join(configs_path,str(yolo_models_v5[model_name]))
+        model=YOLO(model_path)
+        
+    else:    
         raise ValueError(f"Model {model_name} is not recognized.")
     model.to(device)
     return model
@@ -229,7 +244,7 @@ def save_model(models, results, mAP_results, path):
     
     # Save models
     for model_name, model in models.items():
-        model_path = os.path.join(path, f"{model_name}_model.pth")
+        model_path = os.path.join(path, f"{model_name}.pt")
         torch.save(model.state_dict(), model_path)
         print(f"Model '{model_name}' saved at {model_path}")
 
@@ -274,7 +289,7 @@ def save_model(models, results, mAP_results, path):
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate object detection models on COCO dataset")
     
-    parser.add_argument('--model_name', type=str, nargs='+', 
+    parser.add_argument('--model_name', type=str, 
                         required=True,
                         help="List of model names to train [FPN-FasterRCNN, SSD,YOLOv8,YOLOv5]")
     
@@ -284,11 +299,18 @@ def parse_args():
     parser.add_argument('--save_path', type=str, default="models/{model_name}",
                         help="Directory path to save model and results")
     
-    parser.add_argument('--coco_root', type=str, required=True,
+    parser.add_argument('--data', type=str, required=True,
                         help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
     
     parser.add_argument('--epochs', type=int, default=10,
-                        help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
+                        help="Number of epochs for training")
+    
+    parser.add_argument('--batch_size', type=int, default=16,
+                        help="Define batch_size")
+    
+    parser.add_argument('--configs', type=str, default="models/configs",
+                        help="Configs of YOLO model")
+    
     
 
     return parser.parse_args()
@@ -303,33 +325,41 @@ if __name__ == "__main__":
     model_name = args.model_name
     num_classes = args.num_classes
     save_path_template = args.save_path
-    coco_root = args.coco_root
+    data_path = args.data
     num_epochs = args.epochs
+    configs_path = args.configs
+    print(configs_path)
     
     if(model_name == 'FPN-FasterRCNN' or model_name == 'SSD'):
         num_classes +=1
 
-    coco_train = f"{coco_root}/train"
-    coco_val = f"{coco_root}/valid"
-    coco_train_ann = f"{coco_train}/_annotations.coco.json"
-    coco_val_ann = f"{coco_val}/_annotations.coco.json"
+        coco_train = f"{data_path}/train"
+        coco_val = f"{data_path}/valid"
+        coco_train_ann = f"{coco_train}/_annotations.coco.json"
+        coco_val_ann = f"{coco_val}/_annotations.coco.json"
 
-    # Define transformation for COCO images
-    transform = T.Compose([
-        T.ToTensor(),
-    ])
+        # Define transformation for COCO images
+        transform = T.Compose([
+            T.ToTensor(),
+        ])
+        # Load the COCO dataset for training and validation
+        train_data = CocoDetection(root=coco_train, annFile=coco_train_ann, transform=transform)
+        val_data = CocoDetection(root=coco_val, annFile=coco_val_ann, transform=transform)
+        train_loader = DataLoader(train_data, batch_size=16, shuffle=True, collate_fn=collate_fn)
+        val_loader = DataLoader(val_data, batch_size=16, shuffle=False, collate_fn=collate_fn)
 
-    # Load the COCO dataset for training and validation
-    train_data = CocoDetection(root=coco_train, annFile=coco_train_ann, transform=transform)
-    val_data = CocoDetection(root=coco_val, annFile=coco_val_ann, transform=transform)
-    train_loader = DataLoader(train_data, batch_size=16, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_data, batch_size=16, shuffle=False, collate_fn=collate_fn)
+        models = {name: get_model(name, num_classes,configs_path,device) for name in model_name}
+        for model_name in model_name:
+            save_path = save_path_template.format(model_name=model_name)
 
-    models = {name: get_model(name, num_classes,device) for name in model_name}
+        results,mAP_results = train_and_evaluate(models, train_loader, val_loader, num_epochs=num_epochs)
 
-    for model_name in model_name:
+        save_model(models,results, mAP_results, save_path)
+
+    else:
+        model = get_model(model_name, num_classes,configs_path,device)
         save_path = save_path_template.format(model_name=model_name)
 
-    results,mAP_results = train_and_evaluate(models, train_loader, val_loader, num_epochs=num_epochs)
-
-    save_model(models,results, mAP_results, save_path)
+        model.train(data=data_path, epochs=num_epochs, imgsz=640, batch=-1, device=device,
+            plots=False, project= save_path, exist_ok=True,
+        )
