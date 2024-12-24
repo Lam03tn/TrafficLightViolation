@@ -1,3 +1,4 @@
+import os
 import random
 import time
 import cv2
@@ -17,6 +18,7 @@ data_deque = {}
 deepsort = None
 object_counter = {}
 object_counter1 = {}
+num_faults = 0
 
 class TrafficControlApp:
     def __init__(self):
@@ -202,6 +204,8 @@ class TrafficControlApp:
         return direction_str
 
     def draw_boxes(self, img, bbox, names, object_id, identities=None, offset=(0, 0), mode='off'):
+        global num_faults
+        folder_path = 'fault_vehicles'
         if mode == 'off':
             cv2.line(img, self.line_scaled[0], self.line_scaled[1], (0, 255, 0), 3)
         else:
@@ -248,9 +252,13 @@ class TrafficControlApp:
                             else:
                                 object_counter1[obj_name] += 1
                             self.UI_box(box, img_copy, label=label, color=color, line_thickness=2)
-                            cv2.imshow("Fault vehicle", img_copy)
-                            if 0xFF == ord('q'):
-                                break
+                            os.makedirs(folder_path, exist_ok=True)
+                            output_file = f"{folder_path}/fault_vehicle_{num_faults}.png"  # Define the output file name
+                            cv2.imwrite(output_file, img_copy)
+                            num_faults +=1
+                            # cv2.imshow("Fault vehicle", img_copy)
+                            # if 0xFF == ord('q'):
+                            #     break
                             # if cv2.waitKey(33) & (cv2.getWindowProperty("Fault vehicle", cv2.WND_PROP_VISIBLE) < 1 or 0xFF == ord('q')) or self.running == False:
                             #     break
 
