@@ -325,6 +325,6 @@ if __name__ == "__main__":
     for model_name in model_name:
         save_path = save_path_template.format(model_name=model_name)
 
-    results,mAP_results = train_and_evaluate(models, train_loader, val_loader, num_epochs=10)
+    results,mAP_results = train_and_evaluate(models.to(device), train_loader, val_loader, num_epochs=10)
 
     save_model(models,results, mAP_results, save_path)
