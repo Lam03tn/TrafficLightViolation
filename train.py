@@ -201,8 +201,8 @@ def get_model(model_name, num_classes,device ='cpu'):
         
     else:
         raise ValueError(f"Model {model_name} is not recognized.")
-    
-    return model.to(device)
+    model.to(device)
+    return model
 
 # Visualization
 def plot_results(results):
