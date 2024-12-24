@@ -145,7 +145,7 @@ def evaluate_with_map(model, data_loader, device):
     map_score_2 = coco_eval.stats[1]
     return [map_score_1,map_score_2]
 
-def train_and_evaluate(models, train_loader, val_loader, num_epochs=10, lr=0.0001):
+def train_and_evaluate(models, train_loader, val_loader, num_epochs, lr=0.001):
     results = {}
     mAP_results= {}
     for model_name, model in models.items():
@@ -153,9 +153,6 @@ def train_and_evaluate(models, train_loader, val_loader, num_epochs=10, lr=0.000
         optimizer = Adam(model.parameters(), lr=lr, weight_decay=0.0005)
         
         train_losses, val_losses, mAP_0_5_0_95, mAP_0_5 = [], [], [], []
-        
-        if model_name == 'SSD':
-            num_epochs = num_epochs * 3
         
         for epoch in range(num_epochs):
             start_time = time.time()
@@ -184,7 +181,7 @@ def train_and_evaluate(models, train_loader, val_loader, num_epochs=10, lr=0.000
     return results, mAP_results
 
 # Helper function for setting up models
-def get_model(model_name, num_classes):
+def get_model(model_name, num_classes,device ='cpu'):
     if model_name == "FPN-FasterRCNN":
         model = torchvision.models.detection.fasterrcnn_resnet50_fpn(
             weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
@@ -205,7 +202,7 @@ def get_model(model_name, num_classes):
     else:
         raise ValueError(f"Model {model_name} is not recognized.")
     
-    return model
+    return model.to(device)
 
 # Visualization
 def plot_results(results):
@@ -290,6 +287,10 @@ def parse_args():
     parser.add_argument('--coco_root', type=str, required=True,
                         help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
     
+    parser.add_argument('--epochs', type=str, default=10,
+                        help="Root directory of the COCO dataset (should contain 'train' and 'valid' folders)")
+    
+
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -303,6 +304,7 @@ if __name__ == "__main__":
     num_classes = args.num_classes
     save_path_template = args.save_path
     coco_root = args.coco_root
+    num_epochs = args.epochs
 
     coco_train = f"{coco_root}/train"
     coco_val = f"{coco_root}/valid"
@@ -320,11 +322,11 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_data, batch_size=16, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_data, batch_size=16, shuffle=False, collate_fn=collate_fn)
 
-    models = {name: get_model(name, num_classes) for name in model_name}
+    models = {name: get_model(name, num_classes,device) for name in model_name}
 
     for model_name in model_name:
         save_path = save_path_template.format(model_name=model_name)
 
-    results,mAP_results = train_and_evaluate(models.to(device), train_loader, val_loader, num_epochs=10)
+    results,mAP_results = train_and_evaluate(models, train_loader, val_loader, num_epochs=num_epochs)
 
     save_model(models,results, mAP_results, save_path)
