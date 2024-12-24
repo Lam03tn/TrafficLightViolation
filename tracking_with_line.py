@@ -12,7 +12,6 @@ import torch
 import numpy as np
 from collections import deque
 
-
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 data_deque = {}
 deepsort = None
