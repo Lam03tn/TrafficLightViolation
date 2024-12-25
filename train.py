@@ -328,7 +328,6 @@ if __name__ == "__main__":
     data_path = args.data
     num_epochs = args.epochs
     configs_path = args.configs
-    print(configs_path)
     
     if(model_name == 'FPN-FasterRCNN' or model_name == 'SSD'):
         num_classes +=1

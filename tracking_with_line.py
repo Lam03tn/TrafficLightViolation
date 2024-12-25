@@ -1,3 +1,4 @@
+import argparse
 import os
 import random
 import time
@@ -12,6 +13,10 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 import torch
 import numpy as np
 from collections import deque
+from torchvision.models.detection import fasterrcnn_resnet50_fpn,ssd300_vgg16
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+
+COCO_CLASSES = {0:'__background__' , 1: 'bicycle', 2: 'bus', 3: 'car', 4: 'motorcycle'}
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 data_deque = {}
@@ -21,10 +26,13 @@ object_counter1 = {}
 num_faults = 0
 
 class TrafficControlApp:
-    def __init__(self):
+    def __init__(self,model_name,num_classes,weights):
         self.root = tk.Tk()
         self.root.title("Traffic Control System")
-        
+
+        self.num_classes = num_classes
+        self.weight_path = weights
+        self.model_name = model_name
         # Initialize variables
         self.detection_active = False
         self.line_start = None
@@ -266,16 +274,23 @@ class TrafficControlApp:
 
         return img
 
-    def process_frame(self, frame, model=None, deepsort=None, mode='off'):
+    def process_frame(self, frame, model_name, model=None, deepsort=None, mode='off',conf=0.4,device ='cpu'):
         if model is None or deepsort is None:
             return frame
+        if model_name == 'FPN-FasterRCNN' or model_name=='SSD':
+            frame = cv2.resize(frame, (640, 640))
+            frame_normalized = frame.astype('float32') / 255.0
+            outputs = model(torch.from_numpy(frame_normalized).permute(2, 0, 1).unsqueeze(0).to(device))[0]
+            bbox_xyxy = outputs['boxes'].detach().numpy()  # x1, y1, x2, y2
+            scores = outputs['scores'].detach().numpy()
+            labels = outputs['labels'].detach().numpy()
+        else:
+            results = model(frame, verbose=False)
+            bbox_xyxy = results[0].boxes.xyxy.cpu().numpy()
+            scores = results[0].boxes.conf.cpu().numpy()
+            labels = results[0].boxes.cls.cpu().numpy()
 
-        results = model(frame, verbose=False)
-        bbox_xyxy = results[0].boxes.xyxy.cpu().numpy()
-        scores = results[0].boxes.conf.cpu().numpy()
-        labels = results[0].boxes.cls.cpu().numpy()
-
-        indices = np.where(scores > 0.7)[0]
+        indices = np.where(scores > conf)[0]
         bbox_xyxy = bbox_xyxy[indices]
         scores = scores[indices]
         labels = labels[indices]
@@ -290,13 +305,30 @@ class TrafficControlApp:
         bbox = [track.to_tlbr() for track in tracks]
         object_classes = [track.det_class for track in tracks]
 
-        frame = self.draw_boxes(frame, bbox, model.names, object_classes, identities, mode=mode)
+        if model_name == 'FPN-FasterRCNN' or model_name=='SSD': 
+            frame = self.draw_boxes(frame, bbox, COCO_CLASSES, object_id=object_classes, identities=identities, mode=mode)
+        else:
+            frame = self.draw_boxes(frame, bbox, model.names, object_classes, identities, mode=mode)
         return frame
 
     
-    def run_video(self, weights="models/yolov5.pt"):
+    def run_video(self, model_name, num_classes, weights):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = YOLO(weights).to(device)
+        if model_name =='FPN-FasterRCNN':
+            model = fasterrcnn_resnet50_fpn(pretrained=False)
+            in_features = model.roi_heads.box_predictor.cls_score.in_features
+            model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes+1)
+            model.load_state_dict(
+                torch.load(weights, map_location=device)
+            )
+        elif model_name == 'SSD':
+            model = ssd300_vgg16(weights_backbone = None, num_classes=num_classes+1)
+            model.load_state_dict(
+                torch.load(weights,map_location=device)
+            )
+        else:
+            model = YOLO(weights).to(device)
+        model.eval()
         self.init_tracker()
         
         self.cap = cv2.VideoCapture(self.file_path_var.get())
@@ -312,9 +344,9 @@ class TrafficControlApp:
                     break
                 
                 if self.detection_active:
-                    frame = self.process_frame(frame, model,deepsort, mode='on')
+                    frame = self.process_frame(frame, model_name, model,deepsort, mode='on',device=device)
                 else:
-                    frame = self.process_frame(frame, model,deepsort, mode='off')
+                    frame = self.process_frame(frame, model_name, model,deepsort, mode='off',device=device)
                 
                 # Show status
                 status = "RED" if self.detection_active else "GREEN"
@@ -349,13 +381,17 @@ class TrafficControlApp:
         
         if not self.running:
             self.running = True
-            self.video_thread = Thread(target=self.run_video, daemon=True)
+            self.video_thread = Thread(
+                        target=self.run_video,
+                        args=(self.model_name, self.num_classes, self.weight_path),
+                        daemon=True
+                    )            
             self.video_thread.start()
             self.start_button.configure(text="Stop Processing", command=self.stop_processing)
         
     def stop_processing(self):
         self.running = False
-        time.sleep(7)
+        time.sleep(4)
         if self.cap:
             self.cap.release()
         cv2.destroyAllWindows()
@@ -364,6 +400,25 @@ class TrafficControlApp:
     def run(self):
         self.root.mainloop()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Weight path and num classes")
+    
+    parser.add_argument('--model_name', type=str, 
+                        required=True,
+                        help="List of model names to train [FPN-FasterRCNN, SSD,YOLOv8,YOLOv5]")
+    parser.add_argument('--num_classes', type=int, 
+                        required=True,
+                        help="Number of classes in dataset")
+    parser.add_argument('--weight', type=str, 
+                        required=True,
+                        help="Weight path to model checkpoint")
+    
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    app = TrafficControlApp()
+
+    args = parse_args()
+
+    app = TrafficControlApp(args.model_name,args.num_classes,args.weight)
     app.run() 
