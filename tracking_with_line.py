@@ -278,7 +278,7 @@ class TrafficControlApp:
         if model is None or deepsort is None:
             return frame
         if model_name == 'FPN-FasterRCNN' or model_name=='SSD':
-            frame = cv2.resize(frame, (640, 640))
+            # frame_normalized = cv2.resize(frame, (640, 640))
             frame_normalized = frame.astype('float32') / 255.0
             outputs = model(torch.from_numpy(frame_normalized).permute(2, 0, 1).unsqueeze(0).to(device))[0]
             bbox_xyxy = outputs['boxes'].detach().numpy()  # x1, y1, x2, y2
